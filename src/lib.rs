@@ -4,6 +4,7 @@ use serde_json::Value;
 pub enum Key<'a> {
     Index(usize),
     Prop(&'a str),
+    Root,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,7 +40,14 @@ pub fn visit_mut<Mutator>(value: &mut Value, mut mutator: Mutator)
 where
     Mutator: FnMut(&mut Value, &Parent) -> bool,
 {
-    visit_mut_sub(value, &mut mutator, None)
+    visit_mut_impl(
+        value,
+        &mut mutator,
+        Parent {
+            key: Key::Root,
+            parent: None,
+        },
+    )
 }
 
 fn visit_mut_impl<'a, Mutator>(value: &mut Value, mutator: &mut Mutator, parent: Parent<'a>)
@@ -47,37 +55,30 @@ where
     Mutator: FnMut(&mut Value, &Parent) -> bool,
 {
     if mutator(value, &parent) {
-        visit_mut_sub(value, mutator, Some(&parent));
-    }
-}
+        match value {
+            Value::Array(a) => a.iter_mut().enumerate().for_each(|(index, item)| {
+                visit_mut_impl(
+                    item,
+                    mutator,
+                    Parent {
+                        key: Key::Index(index),
+                        parent: Some(&parent),
+                    },
+                )
+            }),
 
-fn visit_mut_sub<Mutator>(value: &mut Value, mutator: &mut Mutator, parent: Option<&Parent>)
-where
-    Mutator: FnMut(&mut Value, &Parent) -> bool,
-{
-    match value {
-        Value::Array(a) => a.iter_mut().enumerate().for_each(|(index, item)| {
-            visit_mut_impl(
-                item,
-                mutator,
-                Parent {
-                    key: Key::Index(index),
-                    parent,
-                },
-            )
-        }),
+            Value::Object(o) => o.iter_mut().for_each(|(k, v)| {
+                visit_mut_impl(
+                    v,
+                    mutator,
+                    Parent {
+                        key: Key::Prop(k),
+                        parent: Some(&parent),
+                    },
+                )
+            }),
 
-        Value::Object(o) => o.iter_mut().for_each(|(k, v)| {
-            visit_mut_impl(
-                v,
-                mutator,
-                Parent {
-                    key: Key::Prop(k),
-                    parent,
-                },
-            )
-        }),
-
-        _ => {}
+            _ => {}
+        }
     }
 }
